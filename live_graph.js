@@ -31,6 +31,8 @@ export class LiveGraph {
     this.animationFrame = null;
     this.timeOffset = 0;
     this.pixelRatio = window.devicePixelRatio || 1;
+    this.outputFilename = 'graph_data.csv';
+    this.recordedData = [];
     this.init();
   }
 
@@ -130,6 +132,11 @@ export class LiveGraph {
       this.dataCount++;
       this.timeOffset += 1/this.dataRate;
       
+      // Record data if recording is active
+      if (this.recording) {
+        this.recordedData.push([...newData]);
+      }
+      
       if (this.data.length > this.maxSamples) {
         this.data.shift();
       }
@@ -148,6 +155,7 @@ export class LiveGraph {
         <h3>Record Graph Data</h3>
         <button id="live-record-btn" class="sidebtn record-btn">${this.recording ? 'Stop Recording' : 'Start Recording'}</button>
         <button id="set-output-file" class="sidebtn">Set Output File</button>
+        <div class="output-file-display">File: ${this.outputFilename}</div>
         <div class="keyboard-hint">Ctrl+R to toggle recording</div>
       </div>
       
@@ -185,7 +193,10 @@ export class LiveGraph {
         <div class="split-section">
           <span>Split:</span>
           <div class="split-controls">
-            ${this.splitChannels.map(ch => `<span class="split-tag">${ch}</span>`).join('')}
+            ${this.splitChannels.map((ch, index) => `
+              <span class="split-tag" onclick="window.liveGraphInstance.editSplitChannel(${index})">${ch}</span>
+            `).join('')}
+            <button class="split-add-btn" onclick="window.liveGraphInstance.addSplitChannel()">+</button>
           </div>
         </div>
         
@@ -235,6 +246,9 @@ export class LiveGraph {
       `}
     `;
     
+    // Make instance globally accessible for split channel functions
+    window.liveGraphInstance = this;
+    
     this.setupEventListeners();
     setStatusBar(`${this.connected ? 'Connected' : 'Disconnected'} | ${this.baud} baud | ${this.dataRate.toFixed(1)} Hz | Live Graph`);
   }
@@ -259,6 +273,64 @@ export class LiveGraph {
     document.querySelectorAll('.signal-item').forEach((item, index) => {
       item.onclick = () => this.toggleChannel(index);
     });
+  }
+
+  // Split channel management functions
+  editSplitChannel(index) {
+    showModal(`
+      <h3>Edit Split Channel</h3>
+      <p>Enter the channel number (1-13):</p>
+      <input type="number" id="split-channel-input" value="${this.splitChannels[index]}" min="1" max="13" style="width: 100%; margin: 1em 0;">
+      <div style="text-align: right; margin-top: 1em;">
+        <button id="save-split-channel" class="sidebtn accent">Save</button>
+        <button id="remove-split-channel" class="sidebtn">Remove</button>
+        <button class="sidebtn close-modal">Cancel</button>
+      </div>
+      <script>
+      document.getElementById('save-split-channel').onclick = () => {
+        const value = parseInt(document.getElementById('split-channel-input').value);
+        if (value >= 1 && value <= 13) {
+          window.liveGraphInstance.splitChannels[${index}] = value;
+          window.liveGraphInstance.renderSidebar();
+        }
+        document.getElementById('modal').classList.add('hidden');
+      };
+      document.getElementById('remove-split-channel').onclick = () => {
+        window.liveGraphInstance.splitChannels.splice(${index}, 1);
+        window.liveGraphInstance.renderSidebar();
+        document.getElementById('modal').classList.add('hidden');
+      };
+      </script>
+    `);
+  }
+
+  addSplitChannel() {
+    if (this.splitChannels.length >= 13) {
+      alert('Maximum 13 split channels allowed');
+      return;
+    }
+    
+    showModal(`
+      <h3>Add Split Channel</h3>
+      <p>Enter the channel number (1-13):</p>
+      <input type="number" id="new-split-channel-input" value="${this.splitChannels.length + 1}" min="1" max="13" style="width: 100%; margin: 1em 0;">
+      <div style="text-align: right; margin-top: 1em;">
+        <button id="add-split-channel" class="sidebtn accent">Add</button>
+        <button class="sidebtn close-modal">Cancel</button>
+      </div>
+      <script>
+      document.getElementById('add-split-channel').onclick = () => {
+        const value = parseInt(document.getElementById('new-split-channel-input').value);
+        if (value >= 1 && value <= 13 && !window.liveGraphInstance.splitChannels.includes(value)) {
+          window.liveGraphInstance.splitChannels.push(value);
+          window.liveGraphInstance.renderSidebar();
+        } else if (window.liveGraphInstance.splitChannels.includes(value)) {
+          alert('Channel ' + value + ' is already in the split list');
+        }
+        document.getElementById('modal').classList.add('hidden');
+      };
+      </script>
+    `);
   }
 
   toggleChannel(index) {
@@ -293,15 +365,27 @@ export class LiveGraph {
   setOutputFile() {
     showModal(`
       <h3>Set Output File</h3>
-      <input type="text" id="output-filename" placeholder="graph_data.csv" value="graph_data.csv" style="width: 100%; margin: 1em 0;">
+      <p>Choose the filename for recording graph data. The file will be saved in CSV format for easy analysis in Excel or other tools.</p>
+      <input type="text" id="output-filename" placeholder="graph_data.csv" value="${this.outputFilename}" style="width: 100%; margin: 1em 0;">
+      <div class="file-format-info">
+        <small>File will include timestamps and all channel data in CSV format</small>
+      </div>
       <div style="text-align: right; margin-top: 1em;">
         <button id="save-output-file" class="sidebtn accent">Set File</button>
         <button class="sidebtn close-modal">Cancel</button>
       </div>
       <script>
       document.getElementById('save-output-file').onclick = () => {
-        const filename = document.getElementById('output-filename').value;
-        alert('Output file set to: ' + filename);
+        let filename = document.getElementById('output-filename').value.trim();
+        if (!filename) filename = 'graph_data.csv';
+        
+        // Ensure CSV extension
+        if (!filename.toLowerCase().endsWith('.csv')) {
+          filename += '.csv';
+        }
+        
+        window.liveGraphInstance.outputFilename = filename;
+        window.liveGraphInstance.renderSidebar();
         document.getElementById('modal').classList.add('hidden');
       };
       </script>
@@ -314,6 +398,7 @@ export class LiveGraph {
     this.timeOffset = 0;
     this.currentValues = new Array(13).fill(0);
     this.smoothingBuffer = [];
+    this.recordedData = [];
     this.renderSidebar();
   }
 
@@ -412,6 +497,11 @@ export class LiveGraph {
                 this.data.push(vals);
                 this.dataCount++;
                 this.currentValues = [...vals];
+                
+                // Record data if recording
+                if (this.recording) {
+                  this.recordedData.push([...vals]);
+                }
                 
                 if (this.data.length > this.maxSamples) {
                   this.data.shift();
@@ -667,8 +757,38 @@ export class LiveGraph {
   }
 
   toggleRecording() {
-    this.recording = !this.recording;
+    if (this.recording) {
+      this.recording = false;
+      
+      // Export recorded data as CSV
+      if (this.recordedData.length > 0) {
+        this.exportRecordedData();
+      }
+      
+      this.recordedData = [];
+    } else {
+      this.recording = true;
+      this.recordedData = [];
+    }
     this.renderSidebar();
+  }
+
+  exportRecordedData() {
+    // Create CSV with proper headers
+    let csv = 'Timestamp,' + this.channelNames.join(',') + '\n';
+    
+    // Add data rows with timestamps
+    this.recordedData.forEach((row, index) => {
+      const timestamp = (index / this.dataRate).toFixed(3);
+      csv += timestamp + ',' + row.map(val => val.toFixed(3)).join(',') + '\n';
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = this.outputFilename;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   saveCSV() {
@@ -677,8 +797,11 @@ export class LiveGraph {
       return;
     }
     
-    let csv = this.channelNames.join(',') + '\n';
-    csv += this.data.map(row => row.join(',')).join('\n');
+    let csv = 'Timestamp,' + this.channelNames.join(',') + '\n';
+    csv += this.data.map((row, index) => {
+      const timestamp = (index / this.dataRate).toFixed(3);
+      return timestamp + ',' + row.map(val => val.toFixed(3)).join(',');
+    }).join('\n');
     
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
